@@ -1,1 +1,4 @@
 node_modules/
+vapid-keys.json
+subscriptions.json
+notify-state.json

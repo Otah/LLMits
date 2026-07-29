@@ -71,7 +71,27 @@
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin-bottom: 28px;
+    margin-bottom: 16px;
+  }
+  .notify-row {
+    display: flex;
+    justify-content: flex-end;
+    margin-bottom: 20px;
+  }
+  .notify-btn {
+    font: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    padding: 6px 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface-1);
+    color: var(--text-secondary);
+    cursor: pointer;
+  }
+  .notify-btn:disabled {
+    opacity: 0.6;
+    cursor: default;
   }
   h1 {
     font-size: 20px;
@@ -130,11 +150,32 @@
     background: var(--track);
     overflow: hidden;
     margin-top: 4px;
+    position: relative;
+  }
+  .meter-pace {
+    position: absolute;
+    top: 0;
+    left: 0;
+    height: 100%;
+    background: var(--text-secondary);
+    opacity: 0.22;
+    border-radius: 5px;
   }
   .meter-fill {
+    position: absolute;
+    top: 0;
+    left: 0;
     height: 100%;
     border-radius: 5px;
     transition: width 0.4s ease;
+  }
+  .meter-pace-tick {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    width: 2px;
+    background: var(--text-primary);
+    opacity: 0.55;
   }
   .sub {
     margin-top: 10px;
@@ -159,6 +200,10 @@
       <h1>Claude Usage</h1>
       <span class="updated" id="updated">loading…</span>
     </header>
+
+    <div class="notify-row">
+      <button id="notify-btn" class="notify-btn">Enable notifications</button>
+    </div>
 
     <div id="error" class="error hidden"></div>
 
@@ -216,10 +261,35 @@ function fmtMoney(minorAmount, currency, decimals) {
   }).format(amount);
 }
 
-function meterCard({ label, percent, statusText, sub }) {
+const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
+const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+
+// Where usage "should" be right now if it were consumed evenly across the
+// window, given only the reset time (the API doesn't expose the window's
+// start) — assumes a fixed-length window, which holds for the session/weekly
+// limits but not for the monthly credit grant, so this is only used there.
+function expectedProgress(resetsAtIso, durationMs) {
+  if (!resetsAtIso) return null;
+  const resetsAt = new Date(resetsAtIso).getTime();
+  const startedAt = resetsAt - durationMs;
+  const frac = (Date.now() - startedAt) / durationMs;
+  return Math.max(0, Math.min(100, frac * 100));
+}
+
+function fmtPaceSuffix(expected) {
+  if (expected == null) return '';
+  return ` · expected ~${expected.toFixed(0)}% by now`;
+}
+
+function meterCard({ label, percent, statusText, sub, expectedPercent }) {
   const status = severityToStatus(statusText, percent);
   const color = STATUS_COLOR[status];
   const pct = Math.max(0, Math.min(100, percent));
+  const hasPace = expectedPercent != null;
+  const expPct = hasPace ? Math.max(0, Math.min(100, expectedPercent)) : 0;
+  const paceHtml = hasPace
+    ? `<div class="meter-pace" style="width:${expPct}%"></div><div class="meter-pace-tick" style="left:${expPct}%"></div>`
+    : '';
   return `
     <div class="card">
       <div class="card-head">
@@ -227,7 +297,7 @@ function meterCard({ label, percent, statusText, sub }) {
         <span class="status-pill"><span class="status-dot" style="background:${color}"></span>${pct.toFixed(0)}%</span>
       </div>
       <div class="value">${pct.toFixed(0)}%</div>
-      <div class="meter-track"><div class="meter-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="meter-track">${paceHtml}<div class="meter-fill" style="width:${pct}%;background:${color}"></div></div>
       <div class="sub">${sub}</div>
     </div>
   `;
@@ -250,18 +320,24 @@ async function refresh() {
 
     const cards = [];
 
+    const sessionResetsAt = data.five_hour?.resets_at ?? sessionLimit?.resets_at;
+    const sessionPace = expectedProgress(sessionResetsAt, FIVE_HOURS_MS);
     cards.push(meterCard({
       label: '5-hour window (session)',
       percent: data.five_hour?.utilization ?? sessionLimit?.percent ?? 0,
       statusText: sessionLimit?.severity,
-      sub: fmtResetsIn(data.five_hour?.resets_at ?? sessionLimit?.resets_at),
+      sub: fmtResetsIn(sessionResetsAt) + fmtPaceSuffix(sessionPace),
+      expectedPercent: sessionPace,
     }));
 
+    const weeklyResetsAt = data.seven_day?.resets_at ?? weeklyLimit?.resets_at;
+    const weeklyPace = expectedProgress(weeklyResetsAt, SEVEN_DAYS_MS);
     cards.push(meterCard({
       label: 'Weekly limit (7 days)',
       percent: data.seven_day?.utilization ?? weeklyLimit?.percent ?? 0,
       statusText: weeklyLimit?.severity,
-      sub: fmtResetsIn(data.seven_day?.resets_at ?? weeklyLimit?.resets_at),
+      sub: fmtResetsIn(weeklyResetsAt) + fmtPaceSuffix(weeklyPace),
+      expectedPercent: weeklyPace,
     }));
 
     if (data.extra_usage?.is_enabled) {
@@ -286,9 +362,65 @@ async function refresh() {
 refresh();
 setInterval(refresh, 30000);
 
+function urlBase64ToUint8Array(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const rawData = atob(base64);
+  const output = new Uint8Array(rawData.length);
+  for (let i = 0; i < rawData.length; i++) output[i] = rawData.charCodeAt(i);
+  return output;
+}
+
+async function updateNotifyButton() {
+  const btn = document.getElementById('notify-btn');
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+    btn.classList.add('hidden');
+    return;
+  }
+  if (Notification.permission === 'denied') {
+    btn.textContent = 'Notifications blocked';
+    btn.disabled = true;
+    return;
+  }
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  btn.textContent = sub ? 'Notifications enabled' : 'Enable notifications';
+  btn.disabled = !!sub;
+}
+
+async function enableNotifications() {
+  const btn = document.getElementById('notify-btn');
+  btn.disabled = true;
+  btn.textContent = 'Enabling…';
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      await updateNotifyButton();
+      return;
+    }
+    const reg = await navigator.serviceWorker.ready;
+    const keyRes = await fetch('/api/vapid-public-key');
+    const { publicKey } = await keyRes.json();
+    const sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+    await fetch('/api/subscribe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(sub),
+    });
+  } catch (err) {
+    console.error('Failed to enable notifications:', err);
+  }
+  await updateNotifyButton();
+}
+
+document.getElementById('notify-btn').addEventListener('click', enableNotifications);
+
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js');
+    navigator.serviceWorker.register('/sw.js').then(() => updateNotifyButton());
   });
 }
 </script>
