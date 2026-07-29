@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Claude Usage</title>
 
 <link rel="manifest" href="/manifest.webmanifest">
@@ -61,7 +61,7 @@
   .page {
     max-width: 720px;
     margin: 0 auto;
-    padding: 40px 20px 64px;
+    padding: calc(40px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(64px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   }
   header {
     display: flex;
