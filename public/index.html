@@ -150,32 +150,25 @@
     background: var(--track);
     overflow: hidden;
     margin-top: 4px;
-    position: relative;
-  }
-  .meter-pace {
-    position: absolute;
-    top: 0;
-    left: 0;
-    height: 100%;
-    background: var(--text-secondary);
-    opacity: 0.22;
-    border-radius: 5px;
   }
   .meter-fill {
-    position: absolute;
-    top: 0;
-    left: 0;
     height: 100%;
     border-radius: 5px;
     transition: width 0.4s ease;
   }
-  .meter-pace-tick {
-    position: absolute;
-    top: 0;
+  .meter-pace-track {
+    height: 4px;
+    border-radius: 2px;
+    background: var(--track);
+    overflow: hidden;
+    margin-top: 6px;
+  }
+  .meter-pace-fill {
     height: 100%;
-    width: 2px;
-    background: var(--text-primary);
-    opacity: 0.55;
+    border-radius: 2px;
+    background: var(--text-secondary);
+    opacity: 0.6;
+    transition: width 0.4s ease;
   }
   .sub {
     margin-top: 10px;
@@ -288,7 +281,7 @@ function meterCard({ label, percent, statusText, sub, expectedPercent }) {
   const hasPace = expectedPercent != null;
   const expPct = hasPace ? Math.max(0, Math.min(100, expectedPercent)) : 0;
   const paceHtml = hasPace
-    ? `<div class="meter-pace" style="width:${expPct}%"></div><div class="meter-pace-tick" style="left:${expPct}%"></div>`
+    ? `<div class="meter-pace-track"><div class="meter-pace-fill" style="width:${expPct}%"></div></div>`
     : '';
   return `
     <div class="card">
@@ -297,7 +290,8 @@ function meterCard({ label, percent, statusText, sub, expectedPercent }) {
         <span class="status-pill"><span class="status-dot" style="background:${color}"></span>${pct.toFixed(0)}%</span>
       </div>
       <div class="value">${pct.toFixed(0)}%</div>
-      <div class="meter-track">${paceHtml}<div class="meter-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="meter-track"><div class="meter-fill" style="width:${pct}%;background:${color}"></div></div>
+      ${paceHtml}
       <div class="sub">${sub}</div>
     </div>
   `;
