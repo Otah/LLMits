@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'claude-stats-shell-v1';
+const SHELL_CACHE = 'claude-stats-shell-v2';
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
@@ -29,7 +29,16 @@ self.addEventListener('fetch', (event) => {
   // Usage data is always live — never served from cache.
   if (url.pathname.startsWith('/api/')) return;
 
+  // Network-first: always prefer the live deploy, fall back to the cached
+  // shell only when offline. (Cache-first here would keep serving whatever
+  // was cached at install time even after a redeploy.)
   event.respondWith(
-    caches.match(event.request).then((cached) => cached || fetch(event.request))
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(SHELL_CACHE).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
