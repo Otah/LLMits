@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Usage</title>
+<style>
+  .viz-root {
+    color-scheme: light;
+    --page:            #f9f9f7;
+    --surface-1:       #fcfcfb;
+    --text-primary:    #0b0b0b;
+    --text-secondary:  #52514e;
+    --text-muted:      #898781;
+    --border:          rgba(11,11,11,0.10);
+    --track:           #e1e0d9;
+    --good:            #0ca30c;
+    --warning:         #fab219;
+    --serious:         #ec835a;
+    --critical:        #d03b3b;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:where(:not([data-theme="light"])) .viz-root {
+      color-scheme: dark;
+      --page:            #0d0d0d;
+      --surface-1:       #1a1a19;
+      --text-primary:    #ffffff;
+      --text-secondary:  #c3c2b7;
+      --text-muted:      #898781;
+      --border:          rgba(255,255,255,0.10);
+      --track:           #2c2c2a;
+      --good:            #0ca30c;
+      --warning:         #fab219;
+      --serious:         #ec835a;
+      --critical:        #e66767;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--page);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+    color: var(--text-primary);
+  }
+  .page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 40px 20px 64px;
+  }
+  header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 28px;
+  }
+  h1 {
+    font-size: 20px;
+    font-weight: 600;
+    margin: 0;
+  }
+  .updated {
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .cards {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+  }
+  .card-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .label {
+    font-size: 14px;
+    color: var(--text-secondary);
+  }
+  .value {
+    font-size: 32px;
+    font-weight: 600;
+    line-height: 1;
+  }
+  .status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+  }
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    display: inline-block;
+  }
+  .meter-track {
+    height: 10px;
+    border-radius: 5px;
+    background: var(--track);
+    overflow: hidden;
+    margin-top: 4px;
+  }
+  .meter-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.4s ease;
+  }
+  .sub {
+    margin-top: 10px;
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+  .error {
+    background: var(--surface-1);
+    border: 1px solid var(--critical);
+    color: var(--critical);
+    border-radius: 12px;
+    padding: 16px 20px;
+    font-size: 14px;
+  }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="viz-root">
+  <div class="page">
+    <header>
+      <h1>Claude Usage</h1>
+      <span class="updated" id="updated">loading…</span>
+    </header>
+
+    <div id="error" class="error hidden"></div>
+
+    <div class="cards" id="cards"></div>
+  </div>
+</div>
+
+<script>
+const STATUS_COLOR = {
+  good: 'var(--good)',
+  warning: 'var(--warning)',
+  serious: 'var(--serious)',
+  critical: 'var(--critical)',
+};
+
+function severityToStatus(severity, percent) {
+  if (severity === 'critical') return 'critical';
+  if (severity === 'serious') return 'serious';
+  if (severity === 'warning') return 'warning';
+  if (severity === 'normal') {
+    if (percent >= 95) return 'critical';
+    if (percent >= 85) return 'serious';
+    if (percent >= 70) return 'warning';
+    return 'good';
+  }
+  if (percent >= 95) return 'critical';
+  if (percent >= 85) return 'serious';
+  if (percent >= 70) return 'warning';
+  return 'good';
+}
+
+function fmtResetsIn(iso) {
+  if (!iso) return '';
+  const ms = new Date(iso).getTime() - Date.now();
+  if (ms <= 0) return 'resetting now';
+  const totalMin = Math.round(ms / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const mins = totalMin % 60;
+  const parts = [];
+  if (days) parts.push(days + 'd');
+  if (hours) parts.push(hours + 'h');
+  if (!days && mins) parts.push(mins + 'm');
+  return 'resets in ' + (parts.join(' ') || '<1m');
+}
+
+function fmtMoney(minorAmount, currency, decimals) {
+  const places = decimals ?? 2;
+  const amount = minorAmount / Math.pow(10, places);
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: currency || 'EUR',
+    minimumFractionDigits: places,
+    maximumFractionDigits: places,
+  }).format(amount);
+}
+
+function meterCard({ label, percent, statusText, sub }) {
+  const status = severityToStatus(statusText, percent);
+  const color = STATUS_COLOR[status];
+  const pct = Math.max(0, Math.min(100, percent));
+  return `
+    <div class="card">
+      <div class="card-head">
+        <span class="label">${label}</span>
+        <span class="status-pill"><span class="status-dot" style="background:${color}"></span>${pct.toFixed(0)}%</span>
+      </div>
+      <div class="value">${pct.toFixed(0)}%</div>
+      <div class="meter-track"><div class="meter-fill" style="width:${pct}%;background:${color}"></div></div>
+      <div class="sub">${sub}</div>
+    </div>
+  `;
+}
+
+async function refresh() {
+  const errorEl = document.getElementById('error');
+  const cardsEl = document.getElementById('cards');
+  const updatedEl = document.getElementById('updated');
+  try {
+    const res = await fetch('/api/usage', { cache: 'no-store' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    errorEl.classList.add('hidden');
+
+    const limitsByKind = Object.fromEntries((data.limits || []).map(l => [l.kind, l]));
+    const sessionLimit = limitsByKind.session;
+    const weeklyLimit = limitsByKind.weekly_all;
+
+    const cards = [];
+
+    cards.push(meterCard({
+      label: '5-hour window (session)',
+      percent: data.five_hour?.utilization ?? sessionLimit?.percent ?? 0,
+      statusText: sessionLimit?.severity,
+      sub: fmtResetsIn(data.five_hour?.resets_at ?? sessionLimit?.resets_at),
+    }));
+
+    cards.push(meterCard({
+      label: 'Weekly limit (7 days)',
+      percent: data.seven_day?.utilization ?? weeklyLimit?.percent ?? 0,
+      statusText: weeklyLimit?.severity,
+      sub: fmtResetsIn(data.seven_day?.resets_at ?? weeklyLimit?.resets_at),
+    }));
+
+    if (data.extra_usage?.is_enabled) {
+      const eu = data.extra_usage;
+      cards.push(meterCard({
+        label: 'Extra usage credits',
+        percent: eu.utilization ?? 0,
+        statusText: data.spend?.severity,
+        sub: `${fmtMoney(eu.used_credits, eu.currency, eu.decimal_places)} of ${fmtMoney(eu.monthly_limit, eu.currency, eu.decimal_places)}`,
+      }));
+    }
+
+    cardsEl.innerHTML = cards.join('');
+    updatedEl.textContent = 'updated ' + new Date().toLocaleTimeString('en-US');
+  } catch (err) {
+    errorEl.textContent = 'Failed to load data: ' + err.message;
+    errorEl.classList.remove('hidden');
+    updatedEl.textContent = 'update failed';
+  }
+}
+
+refresh();
+setInterval(refresh, 30000);
+</script>
+</body>
+</html>
