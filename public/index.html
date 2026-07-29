@@ -16,7 +16,7 @@
 <meta name="apple-mobile-web-app-title" content="Claude Usage">
 
 <style>
-  .viz-root {
+  :root {
     color-scheme: light;
     --page:            #f9f9f7;
     --surface-1:       #fcfcfb;
@@ -31,7 +31,7 @@
     --critical:        #d03b3b;
   }
   @media (prefers-color-scheme: dark) {
-    :root:where(:not([data-theme="light"])) .viz-root {
+    :root {
       color-scheme: dark;
       --page:            #0d0d0d;
       --surface-1:       #1a1a19;
@@ -49,6 +49,10 @@
 
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
+  html {
+    min-height: 100%;
+    background: var(--page);
+  }
   body {
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   }
