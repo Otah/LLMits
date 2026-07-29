@@ -50,8 +50,12 @@
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
-    background: var(--page);
     font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .viz-root {
+    display: block;
+    min-height: 100vh;
+    background: var(--page);
     color: var(--text-primary);
   }
   .page {
@@ -69,6 +73,7 @@
     font-size: 20px;
     font-weight: 600;
     margin: 0;
+    color: var(--text-primary);
   }
   .updated {
     font-size: 13px;
@@ -99,6 +104,7 @@
     font-size: 32px;
     font-weight: 600;
     line-height: 1;
+    color: var(--text-primary);
   }
   .status-pill {
     display: inline-flex;
