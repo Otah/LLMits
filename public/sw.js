@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'claude-stats-shell-v2';
+const SHELL_CACHE = 'claude-stats-shell-v3';
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
@@ -35,8 +35,11 @@ self.addEventListener('fetch', (event) => {
   event.respondWith(
     fetch(event.request)
       .then((response) => {
-        const copy = response.clone();
-        caches.open(SHELL_CACHE).then((cache) => cache.put(event.request, copy));
+        // Only cache good responses — never let a 404/500 poison the offline fallback.
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(SHELL_CACHE).then((cache) => cache.put(event.request, copy));
+        }
         return response;
       })
       .catch(() => caches.match(event.request))

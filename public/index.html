@@ -414,7 +414,24 @@ document.getElementById('notify-btn').addEventListener('click', enableNotificati
 
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').then(() => updateNotifyButton());
+    navigator.serviceWorker.register('/sw.js').then((reg) => {
+      updateNotifyButton();
+
+      // Reload once a new SW takes over, so an already-open tab can't keep
+      // rendering the old build after an update.
+      let refreshed = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (refreshed) return;
+        refreshed = true;
+        window.location.reload();
+      });
+
+      // Force an update check whenever the app is foregrounded — a backgrounded
+      // PWA can be suspended for a long time without ever re-checking for updates.
+      document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'visible') reg.update();
+      });
+    });
   });
 }
 </script>
