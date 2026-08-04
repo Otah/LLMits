@@ -75,6 +75,73 @@ function extractPercents(data) {
   return { session, weekly, extra_usage: extraUsage };
 }
 
+function summarizeUsageState(data, percents = extractPercents(data)) {
+  const creditsEnabled = data.extra_usage?.is_enabled === true;
+  const creditsPercent = percents.extra_usage;
+  const sessionDepleted = percents.session != null && percents.session >= 100;
+  const weeklyDepleted = percents.weekly != null && percents.weekly >= 100;
+  const baseLimitDepleted = sessionDepleted || weeklyDepleted;
+  const creditsDepleted = creditsEnabled && creditsPercent != null && creditsPercent >= 100;
+  const creditsNearlyDepleted = creditsEnabled && creditsPercent != null && creditsPercent >= 90;
+
+  return {
+    creditsEnabled,
+    creditsPercent,
+    sessionDepleted,
+    weeklyDepleted,
+    baseLimitDepleted,
+    creditsDepleted,
+    creditsNearlyDepleted,
+  };
+}
+
+function usageEffectText(data, metric, percent, percents) {
+  const state = summarizeUsageState(data, percents);
+  const metricDepleted = percent >= 100;
+  const baseLimitEvent = metric === 'session' || metric === 'weekly';
+
+  if (state.baseLimitDepleted && state.creditsDepleted) {
+    return 'Limits and credits depleted. Claude may stop working; ask an admin for more credits.';
+  }
+
+  if (baseLimitEvent && metricDepleted) {
+    if (state.creditsEnabled) {
+      if (state.creditsNearlyDepleted) {
+        return 'Now using extra usage credits, but credits are nearly depleted.';
+      }
+      return 'Now using extra usage credits.';
+    }
+    return 'No extra usage credits are enabled; wait for reset or ask an admin.';
+  }
+
+  if (metric === 'extra_usage' && state.creditsDepleted) {
+    return 'Claude can continue on included limits, but may stop if the 5-hour or weekly limit is reached.';
+  }
+
+  if (metric === 'extra_usage' && state.baseLimitDepleted && state.creditsNearlyDepleted) {
+    return 'Currently using extra usage credits; Claude may stop when they run out.';
+  }
+
+  return '';
+}
+
+function resetEffectText(data, metric, percents) {
+  if (metric !== 'session' && metric !== 'weekly') return '';
+
+  const state = summarizeUsageState(data, percents);
+  if (state.baseLimitDepleted) {
+    return 'Another included limit is still depleted.';
+  }
+  if (state.creditsDepleted) {
+    return 'Claude should work again on included usage.';
+  }
+  return '';
+}
+
+function appendSentence(body, sentence) {
+  return sentence ? `${body} ${sentence}` : body;
+}
+
 async function sendNotificationToAll(payload) {
   if (subscriptions.length === 0) return;
   const body = JSON.stringify(payload);
@@ -112,9 +179,13 @@ function evaluateThresholds(data) {
     if (state.lastPercent !== null && percent < state.lastPercent) {
       // The window reset (usage only ever climbs within a cycle).
       if (state.lastNotifiedSeverity === 'warning' || state.lastNotifiedSeverity === 'critical') {
+        const body = appendSentence(
+          `Back down to ${percent.toFixed(0)}%.`,
+          resetEffectText(data, metric, percents)
+        );
         sendNotificationToAll({
           title: `${METRIC_LABELS[metric]} reset`,
-          body: `Back down to ${percent.toFixed(0)}%.`,
+          body,
           tag: `${metric}-reset`,
         });
       }
@@ -130,9 +201,13 @@ function evaluateThresholds(data) {
       }
     }
     if (crossed) {
+      const body = appendSentence(
+        `${SEVERITY_LABELS[crossed.severity]} — now at ${percent.toFixed(0)}%.`,
+        usageEffectText(data, metric, percent, percents)
+      );
       sendNotificationToAll({
         title: METRIC_LABELS[metric],
-        body: `${SEVERITY_LABELS[crossed.severity]} — now at ${percent.toFixed(0)}%.`,
+        body,
         tag: `${metric}-${crossed.severity}`,
       });
       for (const tier of THRESHOLDS) {
