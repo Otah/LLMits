@@ -29,9 +29,9 @@ self.addEventListener('fetch', (event) => {
   // Usage data is always live — never served from cache.
   if (url.pathname.startsWith('/api/')) return;
 
-  // Network-first: always prefer the live deploy, fall back to the cached
+  // Network-first: always prefer the live app, fall back to the cached
   // shell only when offline. (Cache-first here would keep serving whatever
-  // was cached at install time even after a redeploy.)
+  // was cached at install time even after an update.)
   event.respondWith(
     fetch(event.request)
       .then((response) => {

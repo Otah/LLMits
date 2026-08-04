@@ -20,7 +20,7 @@ session limit, 7-day weekly limit, and extra usage credits) in a browser.
 - `public/index.html` — a static, no-build dashboard that polls `/api/usage`
   every 30s and renders it as a few meter bars.
 - No auth on the endpoint or the UI — usage percentages aren't considered
-  secret. Add auth yourself if you deploy this somewhere less trusted.
+  secret. Add auth yourself if you run this somewhere less trusted.
 
 ### Caching / rate-limit backoff
 
@@ -47,9 +47,3 @@ npm run dev   # starts on :3600 by default, override with PORT=
 ```
 
 Requires Node 18+ (uses the built-in `fetch`).
-
-## Deployment (Odyssey stage)
-
-Currently deployed at https://claude-stats.stage.haup.cz as a PM2 process
-(`claude-stats-stage`, port 3600) behind nginx, following this box's usual
-stage-app conventions — see `ecosystem.stage.config.js`.
