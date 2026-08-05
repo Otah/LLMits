@@ -1,4 +1,5 @@
 const express = require('express');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -23,6 +24,7 @@ const METRIC_LABELS = {
   session: '5-hour session limit',
   weekly: '7-day weekly limit',
   extra_usage: 'Extra usage credits',
+  codex_weekly: 'Codex weekly limit',
 };
 
 const SEVERITY_LABELS = {
@@ -66,6 +68,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 
 let cache = null; // { status, body, fetchedAt } — last successful (2xx) response
 let lastError = null; // { status, body, attemptedAt } — most recent failed upstream attempt
+let codexCache = null; // { status, body, fetchedAt } — last successful Codex response
+let codexLastError = null; // { status, body, attemptedAt } — most recent failed Codex attempt
 
 function extractPercents(data) {
   const limitsByKind = Object.fromEntries((data.limits || []).map((l) => [l.kind, l]));
@@ -166,6 +170,10 @@ async function sendNotificationToAll(payload) {
 
 function evaluateThresholds(data) {
   const percents = extractPercents(data);
+  evaluateMetricThresholds(data, percents);
+}
+
+function evaluateMetricThresholds(data, percents) {
   let changed = false;
 
   for (const [metric, percent] of Object.entries(percents)) {
@@ -228,6 +236,12 @@ function evaluateThresholds(data) {
   if (changed) saveNotifyState();
 }
 
+function evaluateCodexThresholds(data) {
+  const percent = data.codex?.utilization ?? null;
+  if (percent == null) return;
+  evaluateMetricThresholds(data, { codex_weekly: percent });
+}
+
 async function refreshCache() {
   let accessToken;
   try {
@@ -272,6 +286,142 @@ async function refreshCache() {
   }
 }
 
+function codexRpcRateLimits() {
+  return new Promise((resolve, reject) => {
+    const child = spawn('codex', ['app-server', '--stdio'], {
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+
+    let stdout = '';
+    let stderr = '';
+    let settled = false;
+    const timer = setTimeout(() => {
+      finish(new Error('Codex app-server timed out.'));
+    }, 10000);
+
+    function finish(err, result) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.kill();
+      if (err) reject(err);
+      else resolve(result);
+    }
+
+    function send(message) {
+      child.stdin.write(`${JSON.stringify(message)}\n`);
+    }
+
+    child.on('error', (err) => finish(err));
+    child.stderr.on('data', (chunk) => {
+      stderr += chunk.toString();
+    });
+    child.on('exit', (code) => {
+      if (!settled && code !== 0) {
+        finish(new Error(stderr.trim() || `Codex app-server exited with code ${code}.`));
+      }
+    });
+
+    child.stdout.on('data', (chunk) => {
+      stdout += chunk.toString();
+      const lines = stdout.split(/\r?\n/);
+      stdout = lines.pop();
+
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let msg;
+        try {
+          msg = JSON.parse(line);
+        } catch (err) {
+          continue;
+        }
+
+        if (msg.id === 0) {
+          if (msg.error) {
+            finish(new Error(msg.error.message || 'Codex initialize failed.'));
+          } else {
+            send({ method: 'account/rateLimits/read', id: 1 });
+          }
+        }
+
+        if (msg.id === 1) {
+          if (msg.error) {
+            finish(new Error(msg.error.message || 'Codex rate limit request failed.'));
+          } else {
+            finish(null, msg.result);
+          }
+        }
+      }
+    });
+
+    send({
+      method: 'initialize',
+      id: 0,
+      params: {
+        clientInfo: { name: 'claude-stats', version: '1.0.0' },
+        capabilities: {},
+      },
+    });
+  });
+}
+
+function codexLimitToUsage(result) {
+  const limit = result.rateLimitsByLimitId?.codex ?? result.rateLimits;
+  if (!limit?.primary) {
+    throw new Error('Codex rate limit data was not available.');
+  }
+
+  const resetsAt = limit.primary.resetsAt
+    ? new Date(limit.primary.resetsAt * 1000).toISOString()
+    : null;
+  const percent = limit.primary.usedPercent ?? 0;
+  const severity = percent >= 95 ? 'critical' : percent >= 85 ? 'serious' : percent >= 70 ? 'warning' : 'normal';
+
+  return {
+    limits: [
+      {
+        kind: 'codex_weekly',
+        percent,
+        severity,
+        resets_at: resetsAt,
+        window_minutes: limit.primary.windowDurationMins,
+        limit_id: limit.limitId,
+        limit_name: limit.limitName,
+      },
+    ],
+    codex: {
+      utilization: percent,
+      resets_at: resetsAt,
+      window_duration_mins: limit.primary.windowDurationMins,
+      plan_type: limit.planType ?? null,
+      credits: limit.credits ?? null,
+      rate_limit_reached_type: limit.rateLimitReachedType ?? null,
+      reset_credits: result.rateLimitResetCredits ?? null,
+    },
+  };
+}
+
+async function refreshCodexCache() {
+  try {
+    const usage = codexLimitToUsage(await codexRpcRateLimits());
+    const body = JSON.stringify(usage);
+    codexCache = { status: 200, body, fetchedAt: Date.now() };
+    codexLastError = null;
+    try {
+      evaluateCodexThresholds(usage);
+    } catch (err) {
+      console.error('codex threshold evaluation failed:', err.message);
+    }
+  } catch (err) {
+    const status = err.code === 'ENOENT' ? 404 : 502;
+    codexLastError = {
+      status,
+      body: JSON.stringify({ error: err.code === 'ENOENT' ? 'Codex CLI was not found on the server.' : err.message }),
+      attemptedAt: Date.now(),
+    };
+  }
+}
+
 app.get('/api/usage', async (req, res) => {
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
     res.status(cache.status).type('application/json').send(cache.body);
@@ -290,6 +440,26 @@ app.get('/api/usage', async (req, res) => {
     res.status(cache.status).type('application/json').send(cache.body);
   } else {
     res.status(lastError.status).type('application/json').send(lastError.body);
+  }
+});
+
+app.get('/api/codex/usage', async (req, res) => {
+  if (codexCache && Date.now() - codexCache.fetchedAt < CACHE_TTL_MS) {
+    res.status(codexCache.status).type('application/json').send(codexCache.body);
+    return;
+  }
+
+  if (codexLastError && Date.now() - codexLastError.attemptedAt < ERROR_BACKOFF_MS) {
+    res.status(codexLastError.status).type('application/json').send(codexLastError.body);
+    return;
+  }
+
+  await refreshCodexCache();
+
+  if (codexCache && Date.now() - codexCache.fetchedAt < CACHE_TTL_MS) {
+    res.status(codexCache.status).type('application/json').send(codexCache.body);
+  } else {
+    res.status(codexLastError.status).type('application/json').send(codexLastError.body);
   }
 });
 
@@ -326,5 +496,7 @@ app.listen(PORT, () => {
 // independent of whether any client is actively polling /api/usage.
 setInterval(() => {
   refreshCache().catch((err) => console.error('background refresh failed:', err.message));
+  refreshCodexCache().catch((err) => console.error('background codex refresh failed:', err.message));
 }, CACHE_TTL_MS);
 refreshCache().catch((err) => console.error('initial refresh failed:', err.message));
+refreshCodexCache().catch((err) => console.error('initial codex refresh failed:', err.message));

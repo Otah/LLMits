@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Claude Usage</title>
+<title>Usage</title>
 
 <link rel="manifest" href="/manifest.webmanifest">
 <link rel="icon" type="image/png" sizes="32x32" href="/icons/favicon-32.png">
@@ -13,7 +13,7 @@
 <meta name="theme-color" content="#2a78d6">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-<meta name="apple-mobile-web-app-title" content="Claude Usage">
+<meta name="apple-mobile-web-app-title" content="Usage">
 
 <style>
   :root {
@@ -65,18 +65,12 @@
   .page {
     max-width: 720px;
     margin: 0 auto;
-    padding: calc(40px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(64px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
-  }
-  header {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    margin-bottom: 16px;
+    padding: calc(14px + env(safe-area-inset-top)) calc(20px + env(safe-area-inset-right)) calc(64px + env(safe-area-inset-bottom)) calc(20px + env(safe-area-inset-left));
   }
   .notify-row {
     display: flex;
     justify-content: flex-end;
-    margin-bottom: 20px;
+    margin-top: 20px;
   }
   .notify-btn {
     font: inherit;
@@ -93,7 +87,20 @@
     opacity: 0.6;
     cursor: default;
   }
-  h1 {
+  .usage-section {
+    margin-top: 0;
+  }
+  .usage-section:not(.hidden) + .usage-section:not(.hidden) {
+    margin-top: 20px;
+  }
+  .section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 14px;
+    margin-bottom: 12px;
+  }
+  h2 {
     font-size: 20px;
     font-weight: 600;
     margin: 0;
@@ -106,19 +113,19 @@
   .cards {
     display: grid;
     grid-template-columns: 1fr;
-    gap: 16px;
+    gap: 12px;
   }
   .card {
     background: var(--surface-1);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 20px 22px;
+    padding: 16px 20px;
   }
   .card-head {
     display: flex;
     align-items: baseline;
     justify-content: space-between;
-    margin-bottom: 14px;
+    margin-bottom: 10px;
   }
   .label {
     font-size: 14px;
@@ -171,7 +178,7 @@
     transition: width 0.4s ease;
   }
   .sub {
-    margin-top: 10px;
+    margin-top: 8px;
     font-size: 13px;
     color: var(--text-muted);
   }
@@ -189,18 +196,27 @@
 <body>
 <div class="viz-root">
   <div class="page">
-    <header>
-      <h1>Claude Usage</h1>
-      <span class="updated" id="updated">loading…</span>
-    </header>
+    <div id="error" class="error hidden"></div>
+
+    <section class="usage-section hidden" id="claude-section">
+      <div class="section-head">
+        <h2>Claude Usage</h2>
+        <span class="updated" id="claude-updated">loading…</span>
+      </div>
+      <div class="cards" id="claude-cards"></div>
+    </section>
+
+    <section class="usage-section hidden" id="codex-section">
+      <div class="section-head">
+        <h2>Codex Usage</h2>
+        <span class="updated" id="codex-updated">loading…</span>
+      </div>
+      <div class="cards" id="codex-cards"></div>
+    </section>
 
     <div class="notify-row">
       <button id="notify-btn" class="notify-btn">Enable notifications</button>
     </div>
-
-    <div id="error" class="error hidden"></div>
-
-    <div class="cards" id="cards"></div>
   </div>
 </div>
 
@@ -299,14 +315,27 @@ function meterCard({ label, percent, statusText, sub, expectedPercent }) {
 
 async function refresh() {
   const errorEl = document.getElementById('error');
-  const cardsEl = document.getElementById('cards');
-  const updatedEl = document.getElementById('updated');
+  const claudeSection = document.getElementById('claude-section');
+  const claudeCardsEl = document.getElementById('claude-cards');
+  const claudeUpdatedEl = document.getElementById('claude-updated');
+  const codexSection = document.getElementById('codex-section');
+  const codexCardsEl = document.getElementById('codex-cards');
+  const codexUpdatedEl = document.getElementById('codex-updated');
+  const updatedText = 'updated ' + new Date().toLocaleTimeString('en-US');
+
+  const results = await Promise.allSettled([
+    fetch('/api/usage', { cache: 'no-store' }),
+    fetch('/api/codex/usage', { cache: 'no-store' }),
+  ]);
+
+  let visibleSections = 0;
+  let lastError = null;
+
   try {
-    const res = await fetch('/api/usage', { cache: 'no-store' });
+    const res = results[0].status === 'fulfilled' ? results[0].value : null;
+    if (!res) throw results[0].reason;
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Unknown error');
-
-    errorEl.classList.add('hidden');
 
     const limitsByKind = Object.fromEntries((data.limits || []).map(l => [l.kind, l]));
     const sessionLimit = limitsByKind.session;
@@ -344,12 +373,47 @@ async function refresh() {
       }));
     }
 
-    cardsEl.innerHTML = cards.join('');
-    updatedEl.textContent = 'updated ' + new Date().toLocaleTimeString('en-US');
+    claudeCardsEl.innerHTML = cards.join('');
+    claudeUpdatedEl.textContent = updatedText;
+    claudeSection.classList.remove('hidden');
+    visibleSections += 1;
   } catch (err) {
-    errorEl.textContent = 'Failed to load data: ' + err.message;
+    claudeSection.classList.add('hidden');
+    claudeCardsEl.innerHTML = '';
+    lastError = err;
+  }
+
+  try {
+    const res = results[1].status === 'fulfilled' ? results[1].value : null;
+    if (!res) throw results[1].reason;
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Unknown error');
+
+    const limit = data.codex;
+    const resetsAt = limit?.resets_at;
+    const windowMs = (limit?.window_duration_mins || 0) * 60 * 1000;
+    const expected = windowMs ? expectedProgress(resetsAt, windowMs) : null;
+    codexCardsEl.innerHTML = meterCard({
+      label: 'Weekly limit (7 days)',
+      percent: limit?.utilization ?? 0,
+      statusText: data.limits?.[0]?.severity,
+      sub: fmtResetsIn(resetsAt) + fmtPaceSuffix(expected),
+      expectedPercent: expected,
+    });
+    codexUpdatedEl.textContent = updatedText;
+    codexSection.classList.remove('hidden');
+    visibleSections += 1;
+  } catch (err) {
+    codexSection.classList.add('hidden');
+    codexCardsEl.innerHTML = '';
+    lastError = err;
+  }
+
+  if (visibleSections) {
+    errorEl.classList.add('hidden');
+  } else {
+    errorEl.textContent = 'Failed to load usage data: ' + (lastError?.message || 'No available usage source.');
     errorEl.classList.remove('hidden');
-    updatedEl.textContent = 'update failed';
   }
 }
 

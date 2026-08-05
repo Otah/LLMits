@@ -1,9 +1,10 @@
 # claude-stats
 
-A tiny dashboard that shows your Claude Code subscription usage (5-hour
-session limit, 7-day weekly limit, and extra usage credits) in a browser.
+A tiny dashboard that shows locally available Claude Code and Codex usage
+limits in a browser. If only one service is available on a machine, the UI only
+shows that section.
 
-> **Linux only, for now.** Credentials are read from
+> **Claude usage is Linux only, for now.** Credentials are read from
 > `~/.claude/.credentials.json`, the path used by Claude Code on Linux. On
 > macOS, Claude Code instead stores the OAuth token in the system Keychain
 > (`security find-generic-password -s 'Claude Code-credentials'`), which this
@@ -16,9 +17,11 @@ session limit, 7-day weekly limit, and extra usage credits) in a browser.
 - `server.js` — a small Express server. On each request to `/api/usage` it
   reads the OAuth access token from `~/.claude/.credentials.json` and calls
   `https://api.anthropic.com/api/oauth/usage`, passing the response straight
-  through to the browser.
-- `public/index.html` — a static, no-build dashboard that polls `/api/usage`
-  every 30s and renders it as a few meter bars.
+  through to the browser. `/api/codex/usage` calls the local Codex app-server
+  JSON-RPC API through `codex app-server --stdio` and returns the Codex weekly
+  rate-limit bucket when Codex is logged in.
+- `public/index.html` — a static, no-build dashboard that polls the usage
+  endpoints every 30s and renders available sections as meter bars.
 - No auth on the endpoint or the UI — usage percentages aren't considered
   secret. Add auth yourself if you run this somewhere less trusted.
 

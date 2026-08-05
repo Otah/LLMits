@@ -1,7 +1,7 @@
 {
-  "name": "Claude Usage",
-  "short_name": "Claude Usage",
-  "description": "Live Claude Code subscription usage — session limit, weekly limit, extra usage credits.",
+  "name": "Usage",
+  "short_name": "Usage",
+  "description": "Live Claude and Codex usage limits in a browser.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

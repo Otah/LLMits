@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'claude-stats-shell-v3';
+const SHELL_CACHE = 'claude-stats-shell-v6';
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
@@ -47,7 +47,7 @@ self.addEventListener('fetch', (event) => {
 });
 
 self.addEventListener('push', (event) => {
-  let payload = { title: 'Claude Usage', body: 'Usage update available.' };
+  let payload = { title: 'Usage', body: 'Usage update available.' };
   try {
     if (event.data) payload = event.data.json();
   } catch (err) {
