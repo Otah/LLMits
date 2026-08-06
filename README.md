@@ -1,4 +1,4 @@
-# LLMits
+# LLMits – AI Tools Limits
 
 *LLM + limits.* A tiny, no-build dashboard that shows the Claude Code and Codex
 usage limits available on the machine it runs on.
