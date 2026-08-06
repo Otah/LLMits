@@ -1,7 +1,7 @@
-# claude-stats
+# LLMits
 
-A tiny, no-build dashboard that shows the Claude Code and Codex usage limits
-available on the machine it runs on.
+*LLM + limits.* A tiny, no-build dashboard that shows the Claude Code and Codex
+usage limits available on the machine it runs on.
 
 [![CI](https://github.com/Otah/LLMits/actions/workflows/ci.yml/badge.svg)](https://github.com/Otah/LLMits/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
