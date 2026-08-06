@@ -1,4 +1,4 @@
-const SHELL_CACHE = 'claude-stats-shell-v7';
+const SHELL_CACHE = 'claude-stats-shell-v8';
 const SHELL_ASSETS = [
   '/',
   '/manifest.webmanifest',
