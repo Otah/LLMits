@@ -1,4 +1,26 @@
 node_modules/
+
+# Runtime state, generated on first start. Contains push keys and endpoints.
 vapid-keys.json
 subscriptions.json
 notify-state.json
+
+# Local environment
+.env
+.env.*
+
+# Logs
+*.log
+npm-debug.log*
+
+# Editor / OS cruft
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Agent tooling
+.claude/
+
+# Nested git worktree checked out inside the primary working tree.
+/main/

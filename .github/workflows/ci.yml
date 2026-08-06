@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Node ${{ matrix.node }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 18 is the documented floor (built-in fetch, AbortSignal.timeout);
+        # 22 is the version pinned in .nvmrc.
+        node: ['18', '20', '22']
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      # There is no automated test suite. These checks catch syntax errors and
+      # malformed static assets, which is what can be verified without one.
+      - name: Syntax-check server and service worker
+        run: npm run check
+
+      - name: Validate JSON assets
+        run: |
+          for file in package.json package-lock.json public/manifest.webmanifest; do
+            node -e "JSON.parse(require('fs').readFileSync('$file', 'utf8'))" \
+              && echo "ok  $file" \
+              || exit 1
+          done
+
+      - name: Boot the server and hit the dashboard
+        # The usage endpoints need Claude Code credentials that CI does not have,
+        # so this only asserts the process starts and serves the static UI.
+        run: |
+          node server.js > server.log 2>&1 &
+          server_pid=$!
+          status=1
+          for _ in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:3600/ > /dev/null; then
+              echo "server responded on :3600"
+              status=0
+              break
+            fi
+            sleep 1
+          done
+          if [ "$status" -ne 0 ]; then
+            echo "server did not respond on :3600 within 30s"
+          fi
+          kill "$server_pid" 2>/dev/null || true
+          echo '--- server output ---'
+          cat server.log
+          exit "$status"
