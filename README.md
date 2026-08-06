@@ -1,4 +1,4 @@
-# claude-stats
+# LLMits – AI Tools Limits
 
 A tiny dashboard that shows locally available Claude Code and Codex usage
 limits in a browser. If only one service is available on a machine, the UI only
