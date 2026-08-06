@@ -4,18 +4,19 @@ A tiny dashboard that shows locally available Claude Code and Codex usage
 limits in a browser. If only one service is available on a machine, the UI only
 shows that section.
 
-> **Claude usage is Linux only, for now.** Credentials are read from
-> `~/.claude/.credentials.json`, the path used by Claude Code on Linux. On
-> macOS, Claude Code instead stores the OAuth token in the system Keychain
-> (`security find-generic-password -s 'Claude Code-credentials'`), which this
-> app does not read. Porting to macOS just means swapping the file read in
-> `server.js` for a Keychain lookup — everything else (the API call, the
-> UI) is platform-agnostic.
+Works on Linux and macOS. Claude Code stores the same credential blob in a
+different place on each: a plaintext `~/.claude/.credentials.json` on Linux,
+the login Keychain on macOS. The server tries the file first and falls back to
+`security find-generic-password -s 'Claude Code-credentials' -w` when the file
+is missing on macOS. The first Keychain read may raise a one-time "security
+wants to use your confidential information" prompt — click Always Allow to
+stop it recurring.
 
 ## How it works
 
 - `server.js` — a small Express server. On each request to `/api/usage` it
-  reads the OAuth access token from `~/.claude/.credentials.json` and calls
+  reads the OAuth access token from Claude Code's credentials (file or
+  Keychain, see above) and calls
   `https://api.anthropic.com/api/oauth/usage`, passing the response straight
   through to the browser. `/api/codex/usage` calls the local Codex app-server
   JSON-RPC API through `codex app-server --stdio` and returns the Codex weekly

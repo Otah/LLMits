@@ -4,9 +4,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const webpush = require('web-push');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+
+const execFileAsync = promisify(execFile);
 
 const PORT = process.env.PORT || 3600;
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
+const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 const CACHE_TTL_MS = 3 * 60 * 1000;
 const ERROR_BACKOFF_MS = 60 * 1000;
 
@@ -60,6 +65,38 @@ function saveSubscriptions() {
 let notifyState = loadJSON(NOTIFY_STATE_PATH, {});
 function saveNotifyState() {
   saveJSON(NOTIFY_STATE_PATH, notifyState);
+}
+
+// Claude Code stores the same JSON blob in two different places depending on the
+// platform: a plaintext file on Linux, the login Keychain on macOS.
+async function readCredentialsJson() {
+  try {
+    return await fs.promises.readFile(CREDENTIALS_PATH, 'utf8');
+  } catch (err) {
+    if (err.code !== 'ENOENT' || process.platform !== 'darwin') throw err;
+  }
+
+  try {
+    const { stdout } = await execFileAsync(
+      '/usr/bin/security',
+      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
+      { timeout: 10000 },
+    );
+    return stdout;
+  } catch (err) {
+    throw new Error(
+      `No credentials file at ${CREDENTIALS_PATH} and the macOS Keychain item ` +
+        `"${KEYCHAIN_SERVICE}" could not be read (${(err.stderr || err.message).trim()}). ` +
+        'Is Claude Code logged in on this machine?',
+    );
+  }
+}
+
+async function getAccessToken() {
+  const parsed = JSON.parse(await readCredentialsJson());
+  const token = parsed.claudeAiOauth && parsed.claudeAiOauth.accessToken;
+  if (!token) throw new Error('Credentials contained no claudeAiOauth.accessToken.');
+  return token;
 }
 
 const app = express();
@@ -245,12 +282,14 @@ function evaluateCodexThresholds(data) {
 async function refreshCache() {
   let accessToken;
   try {
-    const raw = fs.readFileSync(CREDENTIALS_PATH, 'utf8');
-    accessToken = JSON.parse(raw).claudeAiOauth.accessToken;
+    accessToken = await getAccessToken();
   } catch (err) {
+    console.error('Could not read Claude Code credentials:', err.message);
     lastError = {
       status: 500,
-      body: JSON.stringify({ error: 'Could not read Claude Code credentials on the server.' }),
+      body: JSON.stringify({
+        error: `Could not read Claude Code credentials on the server. ${err.message}`,
+      }),
       attemptedAt: Date.now(),
     };
     return;
