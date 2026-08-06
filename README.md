@@ -22,7 +22,9 @@ stop it recurring.
   JSON-RPC API through `codex app-server --stdio` and returns the Codex weekly
   rate-limit bucket when Codex is logged in.
 - `public/index.html` — a static, no-build dashboard that polls the usage
-  endpoints every 30s and renders available sections as meter bars.
+  endpoints every 30s and renders available sections as meter bars. It follows
+  the system light/dark preference by default; the icon button in the footer
+  overrides that and remembers the choice in `localStorage`.
 - No auth on the endpoint or the UI — usage percentages aren't considered
   secret. Add auth yourself if you run this somewhere less trusted.
 
