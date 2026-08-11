@@ -137,6 +137,11 @@
     line-height: 1;
     color: var(--text-primary);
   }
+  .value-of {
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--text-muted);
+  }
   .status-pill {
     display: inline-flex;
     align-items: center;
@@ -181,6 +186,12 @@
     margin-top: 8px;
     font-size: 13px;
     color: var(--text-muted);
+  }
+  .note {
+    margin-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+    opacity: 0.55;
   }
   .error {
     background: var(--surface-1);
@@ -290,7 +301,17 @@ function fmtPaceSuffix(expected) {
   return ` · expected ~${expected.toFixed(0)}% by now`;
 }
 
-function meterCard({ label, percent, statusText, sub, expectedPercent }) {
+// Anthropic's API never sends a reset date for extra usage credits, but the
+// grant is billed on a calendar-month cycle — so assume next month start
+// (UTC) when the API doesn't tell us otherwise.
+function nextMonthBoundsUTC() {
+  const now = new Date();
+  const start = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1);
+  const end = Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1);
+  return { start, end };
+}
+
+function meterCard({ label, percent, statusText, sub, expectedPercent, note, valueText }) {
   const status = severityToStatus(statusText, percent);
   const color = STATUS_COLOR[status];
   const pct = Math.max(0, Math.min(100, percent));
@@ -299,16 +320,18 @@ function meterCard({ label, percent, statusText, sub, expectedPercent }) {
   const paceHtml = hasPace
     ? `<div class="meter-pace-track"><div class="meter-pace-fill" style="width:${expPct}%"></div></div>`
     : '';
+  const noteHtml = note ? `<div class="note">${note}</div>` : '';
   return `
     <div class="card">
       <div class="card-head">
         <span class="label">${label}</span>
         <span class="status-pill"><span class="status-dot" style="background:${color}"></span>${pct.toFixed(0)}%</span>
       </div>
-      <div class="value">${pct.toFixed(0)}%</div>
+      <div class="value">${valueText ?? pct.toFixed(0) + '%'}</div>
       <div class="meter-track"><div class="meter-fill" style="width:${pct}%;background:${color}"></div></div>
       ${paceHtml}
       <div class="sub">${sub}</div>
+      ${noteHtml}
     </div>
   `;
 }
@@ -365,11 +388,27 @@ async function refresh() {
 
     if (data.extra_usage?.is_enabled) {
       const eu = data.extra_usage;
+      const euValue = `${fmtMoney(eu.used_credits, eu.currency, eu.decimal_places)} <span class="value-of">of ${fmtMoney(eu.monthly_limit, eu.currency, eu.decimal_places)}</span>`;
+      let resetSub = '';
+      let euPace = null;
+      let euNote = '';
+      if (eu.resets_at) {
+        resetSub = fmtResetsIn(eu.resets_at);
+        euPace = expectedProgress(eu.resets_at, nextMonthBoundsUTC().end - nextMonthBoundsUTC().start);
+      } else {
+        const { start, end } = nextMonthBoundsUTC();
+        resetSub = fmtResetsIn(new Date(end).toISOString());
+        euPace = Math.max(0, Math.min(100, ((Date.now() - start) / (end - start)) * 100));
+        euNote = 'Not explicitly reported, assuming calendar-month reset.';
+      }
       cards.push(meterCard({
         label: 'Extra usage credits',
         percent: eu.utilization ?? 0,
         statusText: data.spend?.severity,
-        sub: `${fmtMoney(eu.used_credits, eu.currency, eu.decimal_places)} of ${fmtMoney(eu.monthly_limit, eu.currency, eu.decimal_places)}`,
+        valueText: euValue,
+        sub: resetSub + fmtPaceSuffix(euPace),
+        expectedPercent: euPace,
+        note: euNote,
       }));
     }
 
