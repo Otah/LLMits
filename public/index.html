@@ -362,6 +362,36 @@ function meterCard({ label, percent, statusText, sub, expectedPercent, note, val
   `;
 }
 
+// Reflect the worst meter in the tab so a backgrounded tab shows status at a glance.
+function setFavicon(color) {
+  const c = document.createElement('canvas');
+  c.width = c.height = 32;
+  const ctx = c.getContext('2d');
+  ctx.beginPath();
+  ctx.arc(16, 16, 13, 0, 2 * Math.PI);
+  ctx.fillStyle = color;
+  ctx.fill();
+  let link = document.querySelector('link[rel="icon"][data-dynamic]');
+  if (!link) {
+    // Drop the static icon links so there is no ambiguity over which favicon wins.
+    document.querySelectorAll('link[rel~="icon"]').forEach(el => el.remove());
+    link = document.createElement('link');
+    link.rel = 'icon';
+    link.dataset.dynamic = '1';
+    document.head.appendChild(link);
+  }
+  link.href = c.toDataURL('image/png');
+}
+
+function cssVar(name) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+}
+
+function updateTab(percent, status) {
+  document.title = `${Math.round(percent)}% · Usage`;
+  setFavicon(cssVar('--' + status) || '#888');
+}
+
 async function refresh() {
   const errorEl = document.getElementById('error');
   const claudeSection = document.getElementById('claude-section');
@@ -380,6 +410,14 @@ async function refresh() {
   let visibleSections = 0;
   let lastError = null;
 
+  // Track the highest-utilization meter across every section for the tab indicator.
+  let worst = null;
+  function render(opts) {
+    const p = opts.percent ?? 0;
+    if (!worst || p > worst.percent) worst = { percent: p, statusText: opts.statusText };
+    return meterCard(opts);
+  }
+
   try {
     const res = results[0].status === 'fulfilled' ? results[0].value : null;
     if (!res) throw results[0].reason;
@@ -394,7 +432,7 @@ async function refresh() {
 
     const sessionResetsAt = data.five_hour?.resets_at ?? sessionLimit?.resets_at;
     const sessionPace = expectedProgress(sessionResetsAt, FIVE_HOURS_MS);
-    cards.push(meterCard({
+    cards.push(render({
       label: '5-hour window (session)',
       percent: data.five_hour?.utilization ?? sessionLimit?.percent ?? 0,
       statusText: sessionLimit?.severity,
@@ -404,7 +442,7 @@ async function refresh() {
 
     const weeklyResetsAt = data.seven_day?.resets_at ?? weeklyLimit?.resets_at;
     const weeklyPace = expectedProgress(weeklyResetsAt, SEVEN_DAYS_MS);
-    cards.push(meterCard({
+    cards.push(render({
       label: 'Weekly limit (7 days)',
       percent: data.seven_day?.utilization ?? weeklyLimit?.percent ?? 0,
       statusText: weeklyLimit?.severity,
@@ -427,7 +465,7 @@ async function refresh() {
         euPace = Math.max(0, Math.min(100, ((Date.now() - start) / (end - start)) * 100));
         euNote = 'Not explicitly reported, assuming calendar-month reset.';
       }
-      cards.push(meterCard({
+      cards.push(render({
         label: 'Extra usage credits',
         percent: eu.utilization ?? 0,
         statusText: data.spend?.severity,
@@ -458,7 +496,7 @@ async function refresh() {
     const resetsAt = limit?.resets_at;
     const windowMs = (limit?.window_duration_mins || 0) * 60 * 1000;
     const expected = windowMs ? expectedProgress(resetsAt, windowMs) : null;
-    codexCardsEl.innerHTML = meterCard({
+    codexCardsEl.innerHTML = render({
       label: 'Weekly limit (7 days)',
       percent: limit?.utilization ?? 0,
       statusText: data.limits?.[0]?.severity,
@@ -476,9 +514,12 @@ async function refresh() {
 
   if (visibleSections) {
     errorEl.classList.add('hidden');
+    if (worst) updateTab(worst.percent, severityToStatus(worst.statusText, worst.percent));
   } else {
     errorEl.textContent = 'Failed to load usage data: ' + (lastError?.message || 'No available usage source.');
     errorEl.classList.remove('hidden');
+    document.title = '⚠ Usage';
+    setFavicon(cssVar('--text-muted') || '#888');
   }
 }
 
