@@ -1,11 +1,37 @@
 {
-  "name": "claude-stats",
+  "name": "llmits",
   "private": true,
   "version": "1.0.0",
+  "description": "LLM + limits. A tiny local dashboard for Claude Code and Codex usage limits.",
+  "license": "MIT",
+  "author": "Ota Hauptmann <ota@haup.cz>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Otah/LLMits.git"
+  },
+  "homepage": "https://github.com/Otah/LLMits#readme",
+  "bugs": {
+    "url": "https://github.com/Otah/LLMits/issues"
+  },
+  "keywords": [
+    "llm",
+    "claude",
+    "claude-code",
+    "codex",
+    "usage",
+    "rate-limits",
+    "dashboard",
+    "pwa"
+  ],
   "type": "commonjs",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "dev": "node server.js",
-    "start": "node server.js"
+    "start": "node server.js",
+    "check": "node --check server.js && node --check public/sw.js"
   },
   "dependencies": {
     "express": "^4.21.2",
