@@ -390,7 +390,10 @@ function cssVar(name) {
 function updateTab(meters) {
   if (!meters.length) return;
   document.title = meters.map(m => `${m.tag} ${Math.round(m.percent)}%`).join(' · ');
-  const worst = meters.reduce((a, b) => (b.percent > a.percent ? b : a));
+  // Favicon reflects only the resettable limits — the ones worth acting on.
+  const dotted = meters.filter(m => m.dot);
+  if (!dotted.length) return;
+  const worst = dotted.reduce((a, b) => (b.percent > a.percent ? b : a));
   setFavicon(cssVar('--' + worst.status) || '#888');
 }
 
@@ -413,10 +416,12 @@ async function refresh() {
   let lastError = null;
 
   // Collect every rendered meter so the tab can list each one and dot the worst.
+  // dot:false meters (the monthly credit cap) still show in the title but never
+  // drive the favicon — a depleted cap you can't reset shouldn't nag all month.
   const meters = [];
   function render(opts) {
     const p = opts.percent ?? 0;
-    meters.push({ tag: opts.tag, percent: p, status: severityToStatus(opts.statusText, p) });
+    meters.push({ tag: opts.tag, percent: p, status: severityToStatus(opts.statusText, p), dot: opts.dot !== false });
     return meterCard(opts);
   }
 
@@ -471,6 +476,7 @@ async function refresh() {
       }
       cards.push(render({
         tag: '€',
+        dot: false,
         label: 'Extra usage credits',
         percent: eu.utilization ?? 0,
         statusText: data.spend?.severity,
