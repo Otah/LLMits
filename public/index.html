@@ -327,6 +327,13 @@ function fmtPaceSuffix(expected) {
   return ` · expected ~${expected.toFixed(0)}% by now`;
 }
 
+function fmtWindowDuration(minutes) {
+  if (!Number.isFinite(minutes) || minutes <= 0) return null;
+  if (minutes % 1440 === 0) return `${minutes / 1440}d`;
+  if (minutes % 60 === 0) return `${minutes / 60}h`;
+  return `${minutes}m`;
+}
+
 // Anthropic's API never sends a reset date for extra usage credits, but the
 // grant is billed on a calendar-month cycle — so assume next month start
 // (UTC) when the API doesn't tell us otherwise.
@@ -503,18 +510,26 @@ async function refresh() {
     const data = await res.json();
     if (!res.ok) throw new Error(data.error || 'Unknown error');
 
-    const limit = data.codex;
-    const resetsAt = limit?.resets_at;
-    const windowMs = (limit?.window_duration_mins || 0) * 60 * 1000;
-    const expected = windowMs ? expectedProgress(resetsAt, windowMs) : null;
-    codexCardsEl.innerHTML = render({
-      tag: 'codex',
-      label: 'Weekly limit (7 days)',
-      percent: limit?.utilization ?? 0,
-      statusText: data.limits?.[0]?.severity,
-      sub: fmtResetsIn(resetsAt) + fmtPaceSuffix(expected),
-      expectedPercent: expected,
-    });
+    const limits = Array.isArray(data.codex?.windows) ? data.codex.windows : data.limits;
+    if (!Array.isArray(limits) || !limits.length) throw new Error('Codex returned no rate-limit windows');
+
+    const cards = limits
+      .filter(limit => Number.isFinite(limit?.percent))
+      .map((limit) => {
+        const resetsAt = limit.resets_at;
+        const windowMs = (limit.window_minutes || 0) * 60 * 1000;
+        const expected = windowMs ? expectedProgress(resetsAt, windowMs) : null;
+        return render({
+          tag: fmtWindowDuration(limit.window_minutes) || 'codex',
+          label: limit.label || 'Codex rate limit',
+          percent: limit.percent,
+          statusText: limit.severity,
+          sub: fmtResetsIn(resetsAt) + fmtPaceSuffix(expected),
+          expectedPercent: expected,
+        });
+      });
+    if (!cards.length) throw new Error('Codex returned no usable rate-limit windows');
+    codexCardsEl.innerHTML = cards.join('');
     codexUpdatedEl.textContent = updatedText;
     codexSection.classList.remove('hidden');
     visibleSections += 1;

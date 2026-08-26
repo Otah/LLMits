@@ -14,8 +14,8 @@ the two services is available on a machine, the UI shows only that section.
 
 - **Claude Code limits** — 5-hour session window, 7-day weekly window, and
   extra usage credits when enabled on the account.
-- **Codex limits** — the weekly rate-limit bucket, read from the local Codex
-  CLI.
+- **Codex limits** — every rate-limit window reported by the local Codex CLI
+  (currently its 5-hour and 7-day windows).
 - **Installable PWA** — icon set, web manifest, and a service worker with an
   offline shell fallback.
 - **Push notifications** — optional browser notifications when a limit crosses
@@ -81,7 +81,7 @@ Credentials are only ever read, never written or logged.
 | --- | --- | --- |
 | `GET` | `/` | The dashboard (static files from `public/`). |
 | `GET` | `/api/usage` | Claude usage, proxied from `https://api.anthropic.com/api/oauth/usage`. |
-| `GET` | `/api/codex/usage` | Codex weekly rate-limit bucket, via the local Codex app-server. |
+| `GET` | `/api/codex/usage` | Codex rate-limit windows, via the local Codex app-server. |
 | `GET` | `/api/vapid-public-key` | VAPID public key, used by the browser to subscribe to push. |
 | `POST` | `/api/subscribe` | Register a push subscription. |
 | `POST` | `/api/unsubscribe` | Remove a push subscription. |

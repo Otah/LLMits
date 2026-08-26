@@ -29,7 +29,8 @@ const METRIC_LABELS = {
   session: '5-hour session limit',
   weekly: '7-day weekly limit',
   extra_usage: 'Extra usage credits',
-  codex_weekly: 'Codex weekly limit',
+  codex_primary: 'Codex primary rate limit',
+  codex_secondary: 'Codex secondary rate limit',
 };
 
 const SEVERITY_LABELS = {
@@ -210,7 +211,7 @@ function evaluateThresholds(data) {
   evaluateMetricThresholds(data, percents);
 }
 
-function evaluateMetricThresholds(data, percents) {
+function evaluateMetricThresholds(data, percents, labels = METRIC_LABELS) {
   let changed = false;
 
   for (const [metric, percent] of Object.entries(percents)) {
@@ -220,6 +221,7 @@ function evaluateMetricThresholds(data, percents) {
       notifiedTiers: [],
       lastNotifiedSeverity: null,
     });
+    const label = labels[metric] ?? metric;
 
     if (state.lastPercent !== null && percent < state.lastPercent) {
       // The window reset (usage only ever climbs within a cycle).
@@ -229,7 +231,7 @@ function evaluateMetricThresholds(data, percents) {
           resetEffectText(data, metric, percents)
         );
         sendNotificationToAll({
-          title: `${METRIC_LABELS[metric]} reset`,
+          title: `${label} reset`,
           body,
           tag: `${metric}-reset`,
         });
@@ -251,7 +253,7 @@ function evaluateMetricThresholds(data, percents) {
         usageEffectText(data, metric, percent, percents)
       );
       sendNotificationToAll({
-        title: METRIC_LABELS[metric],
+        title: label,
         body,
         tag: `${metric}-${crossed.severity}`,
       });
@@ -274,9 +276,17 @@ function evaluateMetricThresholds(data, percents) {
 }
 
 function evaluateCodexThresholds(data) {
-  const percent = data.codex?.utilization ?? null;
-  if (percent == null) return;
-  evaluateMetricThresholds(data, { codex_weekly: percent });
+  const windows = Array.isArray(data.codex?.windows) ? data.codex.windows : [];
+  const percents = {};
+  const labels = {};
+
+  for (const window of windows) {
+    if (!window?.kind || !Number.isFinite(window.percent)) continue;
+    percents[window.kind] = window.percent;
+    labels[window.kind] = window.label || window.kind;
+  }
+
+  if (Object.keys(percents).length) evaluateMetricThresholds(data, percents, labels);
 }
 
 async function refreshCache() {
@@ -404,34 +414,74 @@ function codexRpcRateLimits() {
   });
 }
 
-function codexLimitToUsage(result) {
-  const limit = result.rateLimitsByLimitId?.codex ?? result.rateLimits;
-  if (!limit?.primary) {
-    throw new Error('Codex rate limit data was not available.');
-  }
+function codexResetToIso(epochSeconds) {
+  if (!Number.isFinite(epochSeconds)) return null;
+  const reset = new Date(epochSeconds * 1000);
+  return Number.isNaN(reset.getTime()) ? null : reset.toISOString();
+}
 
-  const resetsAt = limit.primary.resetsAt
-    ? new Date(limit.primary.resetsAt * 1000).toISOString()
+function codexWindowLabel(windowMinutes, slot) {
+  if (windowMinutes === 5 * 60) return '5-hour limit';
+  if (windowMinutes === 7 * 24 * 60) return 'Weekly limit (7 days)';
+  if (Number.isFinite(windowMinutes) && windowMinutes > 0) {
+    if (windowMinutes % (24 * 60) === 0) return `Rate limit (${windowMinutes / (24 * 60)}-day window)`;
+    if (windowMinutes % 60 === 0) return `Rate limit (${windowMinutes / 60}-hour window)`;
+    return `Rate limit (${windowMinutes}-minute window)`;
+  }
+  return `Codex ${slot} rate limit`;
+}
+
+function codexWindowToUsage(window, slot) {
+  if (!window || typeof window !== 'object' || !Number.isFinite(window.usedPercent)) return null;
+
+  const windowMinutes = Number.isFinite(window.windowDurationMins) && window.windowDurationMins > 0
+    ? window.windowDurationMins
     : null;
-  const percent = limit.primary.usedPercent ?? 0;
+  const percent = window.usedPercent;
   const severity = percent >= 95 ? 'critical' : percent >= 85 ? 'serious' : percent >= 70 ? 'warning' : 'normal';
 
   return {
-    limits: [
-      {
-        kind: 'codex_weekly',
-        percent,
-        severity,
-        resets_at: resetsAt,
-        window_minutes: limit.primary.windowDurationMins,
-        limit_id: limit.limitId,
-        limit_name: limit.limitName,
-      },
-    ],
+    kind: `codex_${slot}`,
+    slot,
+    label: codexWindowLabel(windowMinutes, slot),
+    percent,
+    severity,
+    resets_at: codexResetToIso(window.resetsAt),
+    window_minutes: windowMinutes,
+  };
+}
+
+function codexLimitToUsage(result) {
+  const limit = result.rateLimitsByLimitId?.codex ?? result.rateLimits;
+  if (!limit || typeof limit !== 'object') {
+    throw new Error('Codex rate limit data was not available.');
+  }
+
+  // Codex currently calls these primary and secondary, but either one may be
+  // absent. Keep the source order and render every complete window we receive.
+  const windows = ['primary', 'secondary']
+    .map((slot) => codexWindowToUsage(limit[slot], slot))
+    .filter(Boolean);
+  if (!windows.length) {
+    throw new Error('Codex returned no usable rate-limit windows.');
+  }
+
+  // Preserve the original single-window fields for API consumers while adding
+  // the complete list. Prefer primary, but use the first available window when
+  // an account only reports secondary.
+  const defaultWindow = windows.find((window) => window.slot === 'primary') ?? windows[0];
+
+  return {
+    limits: windows.map((window) => ({
+      ...window,
+      limit_id: limit.limitId,
+      limit_name: limit.limitName,
+    })),
     codex: {
-      utilization: percent,
-      resets_at: resetsAt,
-      window_duration_mins: limit.primary.windowDurationMins,
+      utilization: defaultWindow.percent,
+      resets_at: defaultWindow.resets_at,
+      window_duration_mins: defaultWindow.window_minutes,
+      windows,
       plan_type: limit.planType ?? null,
       credits: limit.credits ?? null,
       rate_limit_reached_type: limit.rateLimitReachedType ?? null,
