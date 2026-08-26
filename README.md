@@ -20,8 +20,8 @@ the two services is available on a machine, the UI shows only that section.
   offline shell fallback.
 - **Push notifications** — optional browser notifications when a limit crosses
   70% / 90% / 100%, and again when the window resets.
-- **Light / dark theme** — follows the system preference, with a manual
-  override remembered in `localStorage`.
+- **Light / dark theme** — cycles between automatic (system preference), light,
+  and dark; manual choices are remembered in `localStorage`.
 - **Polite by default** — responses are cached and failures are backed off so
   the dashboard doesn't make Anthropic's rate limiting worse (see
   [Caching and rate-limit backoff](#caching-and-rate-limit-backoff)).
