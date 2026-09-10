@@ -731,6 +731,9 @@ function applyTitleSettings() {
 titleModeInputs.forEach(input => input.addEventListener('change', () => {
   try { localStorage.setItem('title-mode', input.value); } catch (err) { /* Storage blocked. */ }
   applyTitleSettings();
+  if (input.value === 'custom') {
+    requestAnimationFrame(() => titleInput.focus());
+  }
 }));
 
 titleInput.addEventListener('input', () => {
