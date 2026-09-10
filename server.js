@@ -286,6 +286,12 @@ function evaluateCodexThresholds(data) {
     labels[window.kind] = window.label || window.kind;
   }
 
+  const individualLimit = data.codex?.individual_limit;
+  if (individualLimit && Number.isFinite(individualLimit.percent)) {
+    percents.codex_individual = individualLimit.percent;
+    labels.codex_individual = 'Codex individual limit';
+  }
+
   if (Object.keys(percents).length) evaluateMetricThresholds(data, percents, labels);
 }
 
@@ -451,6 +457,26 @@ function codexWindowToUsage(window, slot) {
   };
 }
 
+function codexIndividualLimitToUsage(individual) {
+  if (!individual || typeof individual !== 'object') return null;
+  const limit = Number(individual.limit);
+  if (!Number.isFinite(limit) || limit <= 0) return null;
+  const used = Number(individual.used);
+  const percent = Number.isFinite(individual.remainingPercent)
+    ? Math.max(0, Math.min(100, 100 - individual.remainingPercent))
+    : Number.isFinite(used)
+      ? Math.max(0, Math.min(100, (used / limit) * 100))
+      : null;
+  if (percent == null) return null;
+
+  return {
+    limit,
+    used: Number.isFinite(used) ? used : null,
+    percent,
+    resets_at: codexResetToIso(individual.resetsAt),
+  };
+}
+
 function codexLimitToUsage(result) {
   const limit = result.rateLimitsByLimitId?.codex ?? result.rateLimits;
   if (!limit || typeof limit !== 'object') {
@@ -486,6 +512,8 @@ function codexLimitToUsage(result) {
       credits: limit.credits ?? null,
       rate_limit_reached_type: limit.rateLimitReachedType ?? null,
       reset_credits: result.rateLimitResetCredits ?? null,
+      individual_limit: codexIndividualLimitToUsage(limit.individualLimit),
+      spend_control_reached: limit.spendControlReached ?? null,
     },
   };
 }

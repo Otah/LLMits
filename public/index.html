@@ -361,6 +361,10 @@ function fmtMoney(minorAmount, currency, decimals) {
   }).format(amount);
 }
 
+function fmtCount(value) {
+  return new Intl.NumberFormat('en-US', { maximumFractionDigits: 1 }).format(value);
+}
+
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -605,6 +609,21 @@ async function refresh() {
           expectedPercent: expected,
         });
       });
+    const individualLimit = data.codex?.individual_limit;
+    if (individualLimit && Number.isFinite(individualLimit.percent)) {
+      const valueText = individualLimit.used != null
+        ? `${fmtCount(individualLimit.used)} <span class="value-of">of ${fmtCount(individualLimit.limit)} credits</span>`
+        : undefined;
+      cards.push(render({
+        tag: 'ind',
+        dot: false,
+        label: 'Individual usage limit',
+        percent: individualLimit.percent,
+        valueText,
+        sub: fmtResetsIn(individualLimit.resets_at),
+      }));
+    }
+
     if (!cards.length) throw new Error('Codex returned no usable rate-limit windows');
     codexCardsEl.innerHTML = cards.join('');
     codexUpdatedEl.textContent = updatedText;
