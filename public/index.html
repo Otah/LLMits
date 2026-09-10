@@ -113,6 +113,44 @@
     width: 14px;
     height: 14px;
   }
+  .title-settings {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border);
+    color: var(--text-secondary);
+    font-size: 13px;
+  }
+  .title-settings-label {
+    display: block;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .title-settings-options {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+  }
+  .title-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    white-space: nowrap;
+  }
+  .title-input {
+    min-width: 180px;
+    flex: 1;
+    font: inherit;
+    font-size: 13px;
+    padding: 5px 8px;
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    background: var(--surface-1);
+    color: var(--text-primary);
+  }
+  .title-input:disabled {
+    opacity: 0.55;
+  }
   .usage-section {
     margin-top: 0;
   }
@@ -255,6 +293,21 @@
       <button id="theme-btn" class="btn theme-btn" type="button"></button>
       <button id="notify-btn" class="btn">Enable notifications</button>
     </div>
+
+    <div class="title-settings">
+      <span class="title-settings-label">Window title</span>
+      <div class="title-settings-options">
+        <label class="title-option">
+          <input type="radio" name="title-mode" value="percentages" checked>
+          Percentages
+        </label>
+        <label class="title-option">
+          <input type="radio" name="title-mode" value="custom">
+          Custom text:
+        </label>
+        <input id="title-input" class="title-input" type="text" maxlength="120" placeholder="e.g. Personal account" disabled>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -395,9 +448,32 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
+let latestMeters = [];
+
+function storedTitleSettings() {
+  try {
+    const mode = localStorage.getItem('title-mode');
+    const text = localStorage.getItem('title-text') || '';
+    return { mode: mode === 'custom' ? 'custom' : 'percentages', text };
+  } catch (err) {
+    return { mode: 'percentages', text: '' };
+  }
+}
+
+function applyWindowTitle(meters = latestMeters) {
+  const settings = storedTitleSettings();
+  if (settings.mode === 'custom' && settings.text.trim()) {
+    document.title = settings.text.trim();
+  } else if (meters.length) {
+    document.title = meters.map(m => `${m.tag} ${Math.round(m.percent)}%`).join(' · ');
+  } else {
+    document.title = 'Usage';
+  }
+}
+
 function updateTab(meters) {
-  if (!meters.length) return;
-  document.title = meters.map(m => `${m.tag} ${Math.round(m.percent)}%`).join(' · ');
+  latestMeters = meters;
+  applyWindowTitle(meters);
   // Favicon reflects only the resettable limits — the ones worth acting on.
   const dotted = meters.filter(m => m.dot);
   if (!dotted.length) return;
@@ -546,7 +622,8 @@ async function refresh() {
   } else {
     errorEl.textContent = 'Failed to load usage data: ' + (lastError?.message || 'No available usage source.');
     errorEl.classList.remove('hidden');
-    document.title = '⚠ Usage';
+    latestMeters = [];
+    applyWindowTitle();
     setFavicon(cssVar('--text-muted') || '#888');
   }
 }
@@ -620,6 +697,29 @@ darkQuery.addEventListener('change', (event) => {
 });
 
 applySelectedTheme(selectedTheme());
+
+const titleInput = document.getElementById('title-input');
+const titleModeInputs = document.querySelectorAll('input[name="title-mode"]');
+
+function applyTitleSettings() {
+  const settings = storedTitleSettings();
+  titleModeInputs.forEach(input => { input.checked = input.value === settings.mode; });
+  titleInput.value = settings.text;
+  titleInput.disabled = settings.mode !== 'custom';
+  applyWindowTitle();
+}
+
+titleModeInputs.forEach(input => input.addEventListener('change', () => {
+  try { localStorage.setItem('title-mode', input.value); } catch (err) { /* Storage blocked. */ }
+  applyTitleSettings();
+}));
+
+titleInput.addEventListener('input', () => {
+  try { localStorage.setItem('title-text', titleInput.value); } catch (err) { /* Storage blocked. */ }
+  applyWindowTitle();
+});
+
+applyTitleSettings();
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
