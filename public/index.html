@@ -191,6 +191,15 @@
     justify-content: space-between;
     margin-bottom: 10px;
   }
+  .card-compact {
+    padding: 10px 20px;
+  }
+  .card-compact .card-head {
+    margin-bottom: 0;
+  }
+  .card-compact .note {
+    margin-top: 0;
+  }
   .label {
     font-size: 14px;
     color: var(--text-secondary);
@@ -402,6 +411,17 @@ function nextMonthBoundsUTC() {
   return { start, end };
 }
 
+function compactCard({ tag, label, note }) {
+  return `
+    <div class="card card-compact">
+      <div class="card-head">
+        <span class="label">${label}</span>
+      </div>
+      <div class="note">${note}</div>
+    </div>
+  `;
+}
+
 function meterCard({ label, percent, statusText, sub, expectedPercent, note, valueText }) {
   const status = severityToStatus(statusText, percent);
   const color = STATUS_COLOR[status];
@@ -512,6 +532,15 @@ async function refresh() {
     meters.push({ tag: opts.tag, percent: p, status: severityToStatus(opts.statusText, p), dot: opts.dot !== false });
     return meterCard(opts);
   }
+  function renderCompact(opts) {
+    meters.push({ tag: opts.tag, percent: 0, status: 'good', dot: false });
+    return compactCard(opts);
+  }
+  // For states with no meaningful percent (e.g. an unlimited cap) — shown as a
+  // card, but left out of the tab title/favicon since there's nothing to report.
+  function renderNote(opts) {
+    return compactCard(opts);
+  }
 
   try {
     const res = results[0].status === 'fulfilled' ? results[0].value : null;
@@ -549,30 +578,44 @@ async function refresh() {
 
     if (data.extra_usage?.is_enabled) {
       const eu = data.extra_usage;
-      const euValue = `${fmtMoney(eu.used_credits, eu.currency, eu.decimal_places)} <span class="value-of">of ${fmtMoney(eu.monthly_limit, eu.currency, eu.decimal_places)}</span>`;
-      let resetSub = '';
-      let euPace = null;
-      let euNote = '';
-      if (eu.resets_at) {
-        resetSub = fmtResetsIn(eu.resets_at);
-        euPace = expectedProgress(eu.resets_at, nextMonthBoundsUTC().end - nextMonthBoundsUTC().start);
+      if (eu.monthly_limit == null) {
+        cards.push(renderNote({
+          tag: '€',
+          label: 'Extra usage credits',
+          note: `Unlimited — spent ${fmtMoney(eu.used_credits, eu.currency, eu.decimal_places)} this month.`,
+        }));
+      } else if (eu.monthly_limit === 0 && !eu.used_credits) {
+        cards.push(renderCompact({
+          tag: '€',
+          label: 'No extra usage credits',
+          note: `Monthly limit set to ${fmtMoney(0, eu.currency, 0)}.`,
+        }));
       } else {
-        const { start, end } = nextMonthBoundsUTC();
-        resetSub = fmtResetsIn(new Date(end).toISOString());
-        euPace = Math.max(0, Math.min(100, ((Date.now() - start) / (end - start)) * 100));
-        euNote = 'Not explicitly reported, assuming calendar-month reset.';
+        const euValue = `${fmtMoney(eu.used_credits, eu.currency, eu.decimal_places)} <span class="value-of">of ${fmtMoney(eu.monthly_limit, eu.currency, eu.decimal_places)}</span>`;
+        let resetSub = '';
+        let euPace = null;
+        let euNote = '';
+        if (eu.resets_at) {
+          resetSub = fmtResetsIn(eu.resets_at);
+          euPace = expectedProgress(eu.resets_at, nextMonthBoundsUTC().end - nextMonthBoundsUTC().start);
+        } else {
+          const { start, end } = nextMonthBoundsUTC();
+          resetSub = fmtResetsIn(new Date(end).toISOString());
+          euPace = Math.max(0, Math.min(100, ((Date.now() - start) / (end - start)) * 100));
+          euNote = 'Not explicitly reported, assuming calendar-month reset.';
+        }
+        cards.push(render({
+          tag: '€',
+          dot: false,
+          label: 'Extra usage credits',
+          percent: eu.utilization ?? 0,
+          statusText: data.spend?.severity,
+          valueText: euValue,
+          sub: resetSub + fmtPaceSuffix(euPace),
+          expectedPercent: euPace,
+          note: euNote,
+        }));
       }
-      cards.push(render({
-        tag: '€',
-        dot: false,
-        label: 'Extra usage credits',
-        percent: eu.utilization ?? 0,
-        statusText: data.spend?.severity,
-        valueText: euValue,
-        sub: resetSub + fmtPaceSuffix(euPace),
-        expectedPercent: euPace,
-        note: euNote,
-      }));
     }
 
     claudeCardsEl.innerHTML = cards.join('');
