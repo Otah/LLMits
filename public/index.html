@@ -762,6 +762,15 @@ applySelectedTheme(selectedTheme());
 
 const titleInput = document.getElementById('title-input');
 const titleModeInputs = document.querySelectorAll('input[name="title-mode"]');
+const titleSettings = document.querySelector('.title-settings');
+
+function isIosStandalonePwa() {
+  const isIos = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  const isStandalone = navigator.standalone === true
+    || matchMedia('(display-mode: standalone)').matches;
+  return isIos && isStandalone;
+}
 
 function applyTitleSettings() {
   const settings = storedTitleSettings();
@@ -785,6 +794,7 @@ titleInput.addEventListener('input', () => {
 });
 
 applyTitleSettings();
+if (isIosStandalonePwa()) titleSettings.classList.add('hidden');
 
 function urlBase64ToUint8Array(base64String) {
   const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
