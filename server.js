@@ -330,9 +330,11 @@ async function refreshCache() {
         console.error('threshold evaluation failed:', err.message);
       }
     } else {
+      console.error(`Claude usage upstream returned ${upstream.status}:`, body.slice(0, 500));
       lastError = { status: upstream.status, body, attemptedAt: Date.now() };
     }
   } catch (err) {
+    console.error('Claude usage upstream request failed:', err.name, err.message);
     lastError = {
       status: 502,
       body: JSON.stringify({ error: 'Upstream request to Anthropic API failed.' }),
