@@ -584,7 +584,7 @@ async function refresh() {
           label: 'Extra usage credits',
           note: `Unlimited — spent ${fmtMoney(eu.used_credits, eu.currency, eu.decimal_places)} this month.`,
         }));
-      } else if (eu.monthly_limit === 0 && !eu.used_credits) {
+      } else if (Number(eu.monthly_limit) === 0) {
         cards.push(renderCompact({
           tag: '€',
           label: 'No extra usage credits',
