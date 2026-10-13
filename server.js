@@ -68,27 +68,40 @@ function saveNotifyState() {
   saveJSON(NOTIFY_STATE_PATH, notifyState);
 }
 
-// Claude Code stores the same JSON blob in two different places depending on the
-// platform: a plaintext file on Linux, the login Keychain on macOS.
-async function readCredentialsJson() {
+function credentialsContainAccessToken(raw) {
   try {
-    return await fs.promises.readFile(CREDENTIALS_PATH, 'utf8');
+    return Boolean(JSON.parse(raw).claudeAiOauth?.accessToken);
   } catch (err) {
-    if (err.code !== 'ENOENT' || process.platform !== 'darwin') throw err;
+    return false;
+  }
+}
+
+// Claude Code stores credentials in the login Keychain on macOS and in a
+// plaintext file on Linux. Prefer the platform's authoritative store, while
+// retaining the file as a fallback for alternate Claude configurations.
+async function readCredentialsJson() {
+  let keychainError = null;
+  if (process.platform === 'darwin') {
+    try {
+      const { stdout } = await execFileAsync(
+        '/usr/bin/security',
+        ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
+        { timeout: 10000 },
+      );
+      if (credentialsContainAccessToken(stdout)) return stdout;
+      keychainError = new Error(`Keychain item "${KEYCHAIN_SERVICE}" contained no access token.`);
+    } catch (err) {
+      keychainError = err;
+    }
   }
 
   try {
-    const { stdout } = await execFileAsync(
-      '/usr/bin/security',
-      ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
-      { timeout: 10000 },
-    );
-    return stdout;
-  } catch (err) {
+    return await fs.promises.readFile(CREDENTIALS_PATH, 'utf8');
+  } catch (fileError) {
+    if (!keychainError) throw fileError;
     throw new Error(
-      `No credentials file at ${CREDENTIALS_PATH} and the macOS Keychain item ` +
-        `"${KEYCHAIN_SERVICE}" could not be read (${(err.stderr || err.message).trim()}). ` +
-        'Is Claude Code logged in on this machine?',
+      `Claude credentials were unavailable in the macOS Keychain and at ${CREDENTIALS_PATH} ` +
+        `(${(keychainError.stderr || keychainError.message).trim()}). Is Claude Code logged in?`,
     );
   }
 }
@@ -542,21 +555,30 @@ async function refreshCodexCache() {
 }
 
 app.get('/api/usage', async (req, res) => {
-  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
+  function sendCachedUsage(stale = false) {
+    res.set('X-Data-Fetched-At', new Date(cache.fetchedAt).toISOString());
+    res.set('X-Data-Stale', String(stale));
     res.status(cache.status).type('application/json').send(cache.body);
+  }
+
+  if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
+    sendCachedUsage();
     return;
   }
 
   // Don't hammer a failing/rate-limited upstream just because clients keep polling.
   if (lastError && Date.now() - lastError.attemptedAt < ERROR_BACKOFF_MS) {
-    res.status(lastError.status).type('application/json').send(lastError.body);
+    if (cache) sendCachedUsage(true);
+    else res.status(lastError.status).type('application/json').send(lastError.body);
     return;
   }
 
   await refreshCache();
 
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
-    res.status(cache.status).type('application/json').send(cache.body);
+    sendCachedUsage();
+  } else if (cache) {
+    sendCachedUsage(true);
   } else {
     res.status(lastError.status).type('application/json').send(lastError.body);
   }

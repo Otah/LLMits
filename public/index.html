@@ -619,7 +619,11 @@ async function refresh() {
     }
 
     claudeCardsEl.innerHTML = cards.join('');
-    claudeUpdatedEl.textContent = updatedText;
+    const fetchedAt = res.headers.get('X-Data-Fetched-At');
+    const stale = res.headers.get('X-Data-Stale') === 'true';
+    claudeUpdatedEl.textContent = stale && fetchedAt
+      ? `cached ${new Date(fetchedAt).toLocaleTimeString('en-US')} — temporarily unavailable`
+      : updatedText;
     claudeSection.classList.remove('hidden');
     visibleSections += 1;
   } catch (err) {
