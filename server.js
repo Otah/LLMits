@@ -13,6 +13,7 @@ const PORT = process.env.PORT || 3600;
 const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
 const KEYCHAIN_SERVICE = 'Claude Code-credentials';
 const CACHE_TTL_MS = 3 * 60 * 1000;
+const MAX_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 const ERROR_BACKOFF_MS = 60 * 1000;
 
 const VAPID_PATH = path.join(__dirname, 'vapid-keys.json');
@@ -555,6 +556,10 @@ async function refreshCodexCache() {
 }
 
 app.get('/api/usage', async (req, res) => {
+  function cacheIsUsable() {
+    return cache && Date.now() - cache.fetchedAt < MAX_CACHE_AGE_MS;
+  }
+
   function sendCachedUsage(stale = false) {
     res.set('X-Data-Fetched-At', new Date(cache.fetchedAt).toISOString());
     res.set('X-Data-Stale', String(stale));
@@ -568,7 +573,8 @@ app.get('/api/usage', async (req, res) => {
 
   // Don't hammer a failing/rate-limited upstream just because clients keep polling.
   if (lastError && Date.now() - lastError.attemptedAt < ERROR_BACKOFF_MS) {
-    if (cache) sendCachedUsage(true);
+    if (cacheIsUsable()) sendCachedUsage(true);
+    else if (cache) res.status(503).json({ error: 'Claude usage data is older than 24 hours.' });
     else res.status(lastError.status).type('application/json').send(lastError.body);
     return;
   }
@@ -577,8 +583,10 @@ app.get('/api/usage', async (req, res) => {
 
   if (cache && Date.now() - cache.fetchedAt < CACHE_TTL_MS) {
     sendCachedUsage();
-  } else if (cache) {
+  } else if (cacheIsUsable()) {
     sendCachedUsage(true);
+  } else if (cache) {
+    res.status(503).json({ error: 'Claude usage data is older than 24 hours.' });
   } else {
     res.status(lastError.status).type('application/json').send(lastError.body);
   }
