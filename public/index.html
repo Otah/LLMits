@@ -376,6 +376,8 @@ function fmtCount(value) {
 
 const FIVE_HOURS_MS = 5 * 60 * 60 * 1000;
 const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
+const requestedProvider = new URLSearchParams(window.location.search).get('filter')?.toLowerCase();
+const providerFilter = ['claude', 'codex'].includes(requestedProvider) ? requestedProvider : null;
 
 // Where usage "should" be right now if it were consumed evenly across the
 // window, given only the reset time (the API doesn't expose the window's
@@ -516,8 +518,8 @@ async function refresh() {
   const updatedText = 'updated ' + new Date().toLocaleTimeString('en-US');
 
   const results = await Promise.allSettled([
-    fetch('/api/usage', { cache: 'no-store' }),
-    fetch('/api/codex/usage', { cache: 'no-store' }),
+    providerFilter === 'codex' ? Promise.resolve(null) : fetch('/api/usage', { cache: 'no-store' }),
+    providerFilter === 'claude' ? Promise.resolve(null) : fetch('/api/codex/usage', { cache: 'no-store' }),
   ]);
 
   let visibleSections = 0;
@@ -542,7 +544,7 @@ async function refresh() {
     return compactCard(opts);
   }
 
-  try {
+  if (providerFilter !== 'codex') try {
     const res = results[0].status === 'fulfilled' ? results[0].value : null;
     if (!res) throw results[0].reason;
     const data = await res.json();
@@ -632,7 +634,7 @@ async function refresh() {
     lastError = err;
   }
 
-  try {
+  if (providerFilter !== 'claude') try {
     const res = results[1].status === 'fulfilled' ? results[1].value : null;
     if (!res) throw results[1].reason;
     const data = await res.json();
