@@ -26,12 +26,15 @@ const THRESHOLDS = [
   { percent: 100, severity: 'critical' },
 ];
 
-const METRIC_LABELS = {
-  session: 'Claude 5-hour session limit',
-  weekly: 'Claude 7-day weekly limit',
-  extra_usage: 'Claude extra usage credits',
-  codex_primary: 'Codex primary rate limit',
-  codex_secondary: 'Codex secondary rate limit',
+const PROVIDER_LABELS = {
+  claude: 'Claude',
+  codex: 'Codex',
+};
+
+const CLAUDE_METRIC_LABELS = {
+  session: '5-hour session limit',
+  weekly: '7-day weekly limit',
+  extra_usage: 'extra usage credits',
 };
 
 const SEVERITY_LABELS = {
@@ -221,21 +224,32 @@ async function sendNotificationToAll(payload) {
 }
 
 function evaluateThresholds(data) {
-  const percents = extractPercents(data);
-  evaluateMetricThresholds(data, percents);
+  const metrics = Object.entries(extractPercents(data)).map(([id, percent]) => ({
+    id,
+    provider: 'claude',
+    label: CLAUDE_METRIC_LABELS[id] ?? id,
+    percent,
+  }));
+  evaluateMetricThresholds(data, metrics);
 }
 
-function evaluateMetricThresholds(data, percents, labels = METRIC_LABELS) {
+function formatNotificationTitle({ provider, label }, event = 'threshold') {
+  const title = `${PROVIDER_LABELS[provider]} ${label}`;
+  return event === 'reset' ? `${title} reset` : title;
+}
+
+function evaluateMetricThresholds(data, metrics) {
+  const percents = Object.fromEntries(metrics.map(({ id, percent }) => [id, percent]));
   let changed = false;
 
-  for (const [metric, percent] of Object.entries(percents)) {
+  for (const notificationMetric of metrics) {
+    const { id: metric, percent } = notificationMetric;
     if (percent == null) continue;
     const state = notifyState[metric] || (notifyState[metric] = {
       lastPercent: null,
       notifiedTiers: [],
       lastNotifiedSeverity: null,
     });
-    const label = labels[metric] ?? metric;
 
     if (state.lastPercent !== null && percent < state.lastPercent) {
       // The window reset (usage only ever climbs within a cycle).
@@ -245,7 +259,7 @@ function evaluateMetricThresholds(data, percents, labels = METRIC_LABELS) {
           resetEffectText(data, metric, percents)
         );
         sendNotificationToAll({
-          title: `${label} reset`,
+          title: formatNotificationTitle(notificationMetric, 'reset'),
           body,
           tag: `${metric}-reset`,
         });
@@ -267,7 +281,7 @@ function evaluateMetricThresholds(data, percents, labels = METRIC_LABELS) {
         usageEffectText(data, metric, percent, percents)
       );
       sendNotificationToAll({
-        title: label,
+        title: formatNotificationTitle(notificationMetric),
         body,
         tag: `${metric}-${crossed.severity}`,
       });
@@ -291,23 +305,29 @@ function evaluateMetricThresholds(data, percents, labels = METRIC_LABELS) {
 
 function evaluateCodexThresholds(data) {
   const windows = Array.isArray(data.codex?.windows) ? data.codex.windows : [];
-  const percents = {};
-  const labels = {};
+  const metrics = [];
 
   for (const window of windows) {
     if (!window?.kind || !Number.isFinite(window.percent)) continue;
-    percents[window.kind] = window.percent;
-    const label = window.label || window.kind;
-    labels[window.kind] = label.startsWith('Codex ') ? label : `Codex ${label}`;
+    metrics.push({
+      id: window.kind,
+      provider: 'codex',
+      label: window.label || window.kind,
+      percent: window.percent,
+    });
   }
 
   const individualLimit = data.codex?.individual_limit;
   if (individualLimit && Number.isFinite(individualLimit.percent)) {
-    percents.codex_individual = individualLimit.percent;
-    labels.codex_individual = 'Codex individual limit';
+    metrics.push({
+      id: 'codex_individual',
+      provider: 'codex',
+      label: 'individual limit',
+      percent: individualLimit.percent,
+    });
   }
 
-  if (Object.keys(percents).length) evaluateMetricThresholds(data, percents, labels);
+  if (metrics.length) evaluateMetricThresholds(data, metrics);
 }
 
 async function refreshCache() {
@@ -451,7 +471,7 @@ function codexWindowLabel(windowMinutes, slot) {
     if (windowMinutes % 60 === 0) return `Rate limit (${windowMinutes / 60}-hour window)`;
     return `Rate limit (${windowMinutes}-minute window)`;
   }
-  return `Codex ${slot} rate limit`;
+  return `${slot} rate limit`;
 }
 
 function codexWindowToUsage(window, slot) {
