@@ -27,9 +27,9 @@ const THRESHOLDS = [
 ];
 
 const METRIC_LABELS = {
-  session: '5-hour session limit',
-  weekly: '7-day weekly limit',
-  extra_usage: 'Extra usage credits',
+  session: 'Claude 5-hour session limit',
+  weekly: 'Claude 7-day weekly limit',
+  extra_usage: 'Claude extra usage credits',
   codex_primary: 'Codex primary rate limit',
   codex_secondary: 'Codex secondary rate limit',
 };
@@ -297,7 +297,8 @@ function evaluateCodexThresholds(data) {
   for (const window of windows) {
     if (!window?.kind || !Number.isFinite(window.percent)) continue;
     percents[window.kind] = window.percent;
-    labels[window.kind] = window.label || window.kind;
+    const label = window.label || window.kind;
+    labels[window.kind] = label.startsWith('Codex ') ? label : `Codex ${label}`;
   }
 
   const individualLimit = data.codex?.individual_limit;
