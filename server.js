@@ -1,5 +1,6 @@
 const express = require('express');
 const { spawn } = require('child_process');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -10,8 +11,14 @@ const { promisify } = require('util');
 const execFileAsync = promisify(execFile);
 
 const PORT = process.env.PORT || 3600;
-const CREDENTIALS_PATH = path.join(os.homedir(), '.claude', '.credentials.json');
-const KEYCHAIN_SERVICE = 'Claude Code-credentials';
+const CLAUDE_CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const CREDENTIALS_PATH = path.join(CLAUDE_CONFIG_DIR, '.credentials.json');
+// Newer Claude Code versions suffix the Keychain service with a hash of the
+// config dir; older versions used the bare name, which may linger stale.
+const KEYCHAIN_SERVICES = [
+  `Claude Code-credentials-${crypto.createHash('sha256').update(CLAUDE_CONFIG_DIR).digest('hex').slice(0, 8)}`,
+  'Claude Code-credentials',
+];
 const CACHE_TTL_MS = 3 * 60 * 1000;
 const MAX_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
 const ERROR_BACKOFF_MS = 60 * 1000;
@@ -86,16 +93,18 @@ function credentialsContainAccessToken(raw) {
 async function readCredentialsJson() {
   let keychainError = null;
   if (process.platform === 'darwin') {
-    try {
-      const { stdout } = await execFileAsync(
-        '/usr/bin/security',
-        ['find-generic-password', '-s', KEYCHAIN_SERVICE, '-w'],
-        { timeout: 10000 },
-      );
-      if (credentialsContainAccessToken(stdout)) return stdout;
-      keychainError = new Error(`Keychain item "${KEYCHAIN_SERVICE}" contained no access token.`);
-    } catch (err) {
-      keychainError = err;
+    for (const service of KEYCHAIN_SERVICES) {
+      try {
+        const { stdout } = await execFileAsync(
+          '/usr/bin/security',
+          ['find-generic-password', '-s', service, '-w'],
+          { timeout: 10000 },
+        );
+        if (credentialsContainAccessToken(stdout)) return stdout;
+        keychainError = keychainError || new Error(`Keychain item "${service}" contained no access token.`);
+      } catch (err) {
+        keychainError = keychainError || err;
+      }
     }
   }
 
