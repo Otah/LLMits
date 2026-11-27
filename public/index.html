@@ -413,6 +413,10 @@ function nextMonthBoundsUTC() {
   return { start, end };
 }
 
+function escapeHtml(text) {
+  return String(text).replace(/[&<>"']/g, c => `&#${c.charCodeAt(0)};`);
+}
+
 function compactCard({ tag, label, note }) {
   return `
     <div class="card card-compact">
@@ -577,6 +581,26 @@ async function refresh() {
       sub: fmtResetsIn(weeklyResetsAt) + fmtPaceSuffix(weeklyPace),
       expectedPercent: weeklyPace,
     }));
+
+    // Per-model weekly caps (e.g. Fable) arrive as `weekly_scoped` limits; their
+    // share of the overall weekly limit is matched by index in `weekly_scoped_shares`.
+    (data.limits || []).forEach((limit, index) => {
+      if (limit.kind !== 'weekly_scoped') return;
+      const name = limit.scope?.model?.display_name || limit.scope?.surface || 'Scoped';
+      const share = (data.weekly_scoped_shares || []).find(s => s.limit_index === index);
+      const pace = expectedProgress(limit.resets_at, SEVEN_DAYS_MS);
+      cards.push(render({
+        tag: name,
+        label: `Weekly limit — ${escapeHtml(name)}`,
+        percent: limit.percent ?? 0,
+        statusText: limit.severity,
+        sub: fmtResetsIn(limit.resets_at) + fmtPaceSuffix(pace),
+        expectedPercent: pace,
+        note: share
+          ? `Capped at ${share.allowance_percent_of_weekly}% of the weekly limit; ${share.used_percent_of_weekly}% of the weekly limit used so far.`
+          : '',
+      }));
+    });
 
     if (data.extra_usage?.is_enabled) {
       const eu = data.extra_usage;

@@ -239,6 +239,18 @@ function evaluateThresholds(data) {
     label: CLAUDE_METRIC_LABELS[id] ?? id,
     percent,
   }));
+  // Per-model weekly caps (e.g. Fable) — notified separately from the overall weekly limit.
+  for (const limit of data.limits || []) {
+    if (limit.kind !== 'weekly_scoped' || !Number.isFinite(limit.percent)) continue;
+    const name = limit.scope?.model?.display_name || limit.scope?.surface;
+    if (!name) continue;
+    metrics.push({
+      id: `weekly_${String(name).toLowerCase().replace(/[^a-z0-9]+/g, '_')}`,
+      provider: 'claude',
+      label: `7-day ${name} limit`,
+      percent: limit.percent,
+    });
+  }
   evaluateMetricThresholds(data, metrics);
 }
 
